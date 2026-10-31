@@ -8,3 +8,4 @@ __pycache__/
 *.rdb
 appendonlydir/
 .DS_Store
+.idea/
