@@ -4,6 +4,7 @@ import redis
 import os
 import pymysql
 from job_repository import update_job_status
+from settings import settings
 
 demo_redis=redis.Redis(
     host='127.0.0.1',
@@ -14,8 +15,8 @@ demo_redis=redis.Redis(
 
 app=Celery(
     "week19",
-    broker="redis://127.0.0.1:6379/1",
-    backend="redis://127.0.0.1:6379/2"
+    broker=settings.redis_broker_url,
+    backend=settings.redis_backend_url
 )
 
 @app.task(track_started=True)
@@ -94,17 +95,15 @@ def listing_with_idempotency(product_id:int,request_id:int):
 def listing_to_mysql(self,product_id: int, request_id: str):
     task_id = self.request.id
     update_job_status(task_id, "STARTED")
-    conn=pymysql.connect(
-        host='127.0.01',
-        port=3306,
-        user='root',
-        password=os.environ['MYSQL_PASSWORD'],
-        database='week19_demo',
+    conn = pymysql.connect(
+        host=settings.mysql_host,
+        port=settings.mysql_port,
+        user=settings.mysql_user,
+        password=settings.mysql_password.get_secret_value(),
+        database=settings.mysql_database,
         autocommit=False
     )
     try:
-        if product_id == 9999:
-            raise RuntimeError("Simulated listing failure")
         with conn.cursor() as cursor:
             cursor.execute(
                 'INSERT INTO listing_results (request_id,product_id,title) VALUES (%s, %s,%s)',
@@ -118,7 +117,7 @@ def listing_to_mysql(self,product_id: int, request_id: str):
             )
         return {
             "status": "created",
-            "   request_id": request_id
+            "request_id": request_id
         }
     except pymysql.err.IntegrityError as exc:
         conn.rollback()
