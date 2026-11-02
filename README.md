@@ -163,3 +163,138 @@ Python · asyncio · FastAPI · Celery · MySQL · Redis（Broker / Result Backe
 通过独立实验掌握 Python 后端开发中的并发处理、数据库操作、缓存设计、后台任务、消息队列和异常处理，逐步提升实际工程开发能力。
 
 本项目主要用于学习与实践，不作为生产级系统使用。
+
+## Week21 — Docker 本地容器化部署
+
+### 目标
+
+使用 Docker Compose 运行现有后台任务项目：
+
+- Web：FastAPI
+- Worker：Celery
+- Redis：Broker 和 Result Backend
+- MySQL：任务历史与业务结果
+
+Web 和 Worker 使用同一应用镜像，但运行不同命令。
+
+### 已验证环境
+
+- Mac：arm64（Apple Silicon）
+- Docker Desktop：4.81.0
+- Docker Engine：29.6.1
+- Docker Compose：v5.2.0
+- 应用基础镜像：python:3.13-slim
+- Redis：redis:7.4.12-alpine3.21
+- MySQL：mysql:8.4.13
+
+### 构建镜像
+
+从 PythonProject 根目录进入：
+
+```bash
+cd week19-background-jobs
+```
+
+构建应用镜像：
+
+```bash
+docker build -t week21-backend:day2 .
+```
+
+应用依赖保存在 `requirements.docker.txt` 中，不复制宿主机 `.venv`。
+
+### 配置
+
+在应用目录创建 `.env.week21`，填写独立测试密码：
+
+```text
+W21_ROOT_PASSWORD=<自行设置的测试密码>
+W21_APP_PASSWORD=<另一组测试密码>
+```
+
+不要使用真实业务数据库密码。
+
+`.env.week21` 不应提交到 Git，也不应复制进镜像。
+
+### 启动服务
+
+```bash
+docker compose --env-file .env.week21 -p week21-fresh config -q
+docker compose --env-file .env.week21 -p week21-fresh up -d
+```
+
+查看状态：
+
+```bash
+docker compose --env-file .env.week21 -p week21-fresh ps
+```
+
+访问：<http://127.0.0.1:18080/openapi.json>
+
+注意：再次使用相同项目名会复用已有的命名卷，不代表每次都从空数据库开始。
+
+### 数据库初始化
+
+`sql/001_schema.sql` 包含本项目最小表结构：
+
+- `job_runs`
+- `listing_results`
+
+MySQL 官方镜像在全新数据目录首次初始化时执行该脚本。
+
+已有数据库数据卷不会在每次重启时重新执行初始化脚本。
+
+### 网络与数据持久化
+
+- Web 仅发布到宿主机 `127.0.0.1:18080`
+- Redis 和 MySQL 不发布宿主机端口
+- 容器之间通过 Compose 服务名通信
+- MySQL 使用独立命名卷
+- Redis 使用 AOF（appendfsync everysec）和独立命名卷
+
+持久化不等于备份，也不能保证任务 Exactly-once。
+
+### 日志和停止服务
+
+查看日志：
+
+```bash
+docker compose --env-file .env.week21 -p week21-fresh logs --tail=40 web worker
+```
+
+停止服务并保留容器和数据：
+
+```bash
+docker compose --env-file .env.week21 -p week21-fresh stop
+```
+
+删除本项目服务容器及网络，但保留命名卷：
+
+```bash
+docker compose --env-file .env.week21 -p week21-fresh down
+```
+
+不要随意使用 `down -v`，它会删除本项目声明的命名卷。
+
+### 已验证内容
+
+- Docker 镜像构建和依赖导入成功
+- Web 和 Worker 分别运行
+- Redis、MySQL 容器间连接成功
+- MySQL 自动初始化业务表
+- Redis AOF 重建恢复成功
+- 健康检查通过
+- POST /jobs → Worker → MySQL 真实链路成功
+- 容器删除重建后 MySQL 历史数据保留
+- 新 Compose 项目和新数据卷可独立初始化
+- Redis 错误连接与 MySQL 缺表故障排查
+
+### 已知边界
+
+- 只验证了本地 Docker 环境
+- 未部署到云服务器
+- 未完成公网认证与授权
+- 未验证跨 CPU 架构
+- 未证明 Exactly-once 或完整崩溃恢复
+- 未进行正式生产性能测试
+- 数据卷持久化不等于备份

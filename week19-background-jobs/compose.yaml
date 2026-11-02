@@ -1,0 +1,82 @@
+
+services:
+  web:
+    image: week21-backend:day2
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: week21_app
+      MYSQL_PASSWORD: ${W21_APP_PASSWORD:?missing}
+      MYSQL_DATABASE: week21_lab
+      REDIS_BROKER_URL: redis://redis:6379/0
+      REDIS_BACKEND_URL: redis://redis:6379/1
+    ports:
+      - "127.0.0.1:18080:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    image: week21-backend:day2
+    command:
+      - python
+      - -m
+      - celery
+      - -A
+      - tasks:app
+      - worker
+      - --loglevel=info
+      - --pool=solo
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_USER: week21_app
+      MYSQL_PASSWORD: ${W21_APP_PASSWORD:?missing}
+      MYSQL_DATABASE: week21_lab
+      REDIS_BROKER_URL: redis://redis:6379/0
+      REDIS_BACKEND_URL: redis://redis:6379/1
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.4.12-alpine3.21
+    command: [ "redis-server", "--appendonly", "yes", "--appendfsync", "everysec" ]
+    volumes:
+      - week21_redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli","ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  mysql:
+    image: mysql:8.4.13
+    environment:
+      MYSQL_ROOT_PASSWORD: ${W21_ROOT_PASSWORD:?missing}
+      MYSQL_DATABASE: week21_lab
+      MYSQL_USER: week21_app
+      MYSQL_PASSWORD: ${W21_APP_PASSWORD:?missing}
+    volumes:
+      - week21_mysql_data:/var/lib/mysql
+      - ./sql/001_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+
+    healthcheck:
+      test: >-
+        MYSQL_PWD="$${MYSQL_PASSWORD}"
+        mysql --protocol=tcp -h 127.0.0.1
+        -u "$${MYSQL_USER}" "$${MYSQL_DATABASE}"
+        -Nse "SELECT 1" >/dev/null
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+
+
+volumes:
+  week21_mysql_data:
+  week21_redis_data:
